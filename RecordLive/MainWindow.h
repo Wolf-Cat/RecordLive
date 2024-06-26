@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include "AvRecordLive.h"
 
 namespace Ui {
 class MainWindow;
@@ -20,6 +21,8 @@ public:
 
 private:
     Ui::MainWindow *ui;
+
+    AVRecordLive m_av;
 };
 
 #endif // MAINWINDOW_H

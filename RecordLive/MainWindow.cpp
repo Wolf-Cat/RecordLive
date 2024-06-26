@@ -23,6 +23,9 @@ void MainWindow::OnBtnStartClicked()
 {
     ui->startBtn->setEnabled(false);
     ui->stopBtn->setEnabled(true);
+
+    m_av.Init();
+    m_av.Start();
 }
 
 void MainWindow::OnBtnStopClicked()

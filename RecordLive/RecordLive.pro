@@ -25,10 +25,12 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
         main.cpp \
-        MainWindow.cpp
+        MainWindow.cpp \
+    AvRecordLive.cpp
 
 HEADERS += \
-        MainWindow.h
+        MainWindow.h \
+    AvRecordLive.h
 
 FORMS += \
         Mainwindow.ui
