@@ -32,3 +32,19 @@ HEADERS += \
 
 FORMS += \
         Mainwindow.ui
+
+
+win32 {
+
+INCLUDEPATH += ../include/ffmpeg4.2.1 \
+
+LIBS += -L$$PWD/../lib/ffmpeg4.2.1   \
+        -lavutil  \
+        -lavcodec \
+        -lavdevice \
+        -lavfilter \
+        -lavformat \
+        -lpostproc  \
+        -lswresample \
+        -lswscale   \
+}
