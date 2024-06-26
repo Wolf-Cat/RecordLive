@@ -15,6 +15,9 @@ public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
 
+    void OnBtnStartClicked();
+    void OnBtnStopClicked();
+
 private:
     Ui::MainWindow *ui;
 };

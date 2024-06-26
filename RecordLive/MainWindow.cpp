@@ -6,9 +6,27 @@ MainWindow::MainWindow(QWidget *parent) :
     ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
+    connect(ui->startBtn, &QPushButton::clicked, this, &MainWindow::OnBtnStartClicked);
+    connect(ui->stopBtn, &QPushButton::clicked, this, &MainWindow::OnBtnStopClicked);
+
+    ui->startBtn->setEnabled(true);
+    ui->stopBtn->setEnabled(false);
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::OnBtnStartClicked()
+{
+    ui->startBtn->setEnabled(false);
+    ui->stopBtn->setEnabled(true);
+}
+
+void MainWindow::OnBtnStopClicked()
+{
+    ui->startBtn->setEnabled(true);
+    ui->stopBtn->setEnabled(false);
 }
