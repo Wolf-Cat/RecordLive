@@ -32,4 +32,6 @@ void MainWindow::OnBtnStopClicked()
 {
     ui->startBtn->setEnabled(true);
     ui->stopBtn->setEnabled(false);
+
+    m_av.Stop();
 }
