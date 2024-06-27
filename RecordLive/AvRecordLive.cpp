@@ -1,4 +1,5 @@
 #include "AvRecordLive.h"
+#include "Utils.h"
 #include <QDebug>
 
 extern "C" {
@@ -40,7 +41,7 @@ void AVRecordLive::Start()
         return;
     }
 
-    if (OpenVideoDevice() < 0) {
+    if (OpenAudioDevice() < 0) {
         qDebug() << "Open Audio device failed";
         return;
     }
@@ -121,7 +122,12 @@ int AVRecordLive::OpenVideoDevice()
 
 int AVRecordLive::OpenAudioDevice()
 {
+    int ret = -1;
+    AVCodec *decoder = NULL;
 
+    qDebug() << "MicrophoneDeviceName: " << Utils::GetMicrophoneDeviceName();
+
+    return ret;
 }
 
 void AVRecordLive::MuxerProcessThread()

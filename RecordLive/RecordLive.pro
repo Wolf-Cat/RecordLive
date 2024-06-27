@@ -17,6 +17,8 @@ TEMPLATE = app
 # deprecated API in order to know how to port your code away from it.
 DEFINES += QT_DEPRECATED_WARNINGS
 
+LIBS +=  -lquartz  -lole32 -lstrmiids -lVfw32 -loleaut32
+
 # You can also make your code fail to compile if you use deprecated APIs.
 # In order to do so, uncomment the following line.
 # You can also select to disable deprecated APIs only up to a certain version of Qt.
@@ -26,11 +28,13 @@ DEFINES += QT_DEPRECATED_WARNINGS
 SOURCES += \
         main.cpp \
         MainWindow.cpp \
-    AvRecordLive.cpp
+    AvRecordLive.cpp \
+    Utils.cpp
 
 HEADERS += \
         MainWindow.h \
-    AvRecordLive.h
+    AvRecordLive.h \
+    Utils.h
 
 FORMS += \
         Mainwindow.ui
