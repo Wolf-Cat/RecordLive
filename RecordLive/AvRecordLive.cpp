@@ -127,6 +127,28 @@ int AVRecordLive::OpenAudioDevice()
 
     qDebug() << "MicrophoneDeviceName: " << Utils::GetMicrophoneDeviceName();
 
+    // MicrophoneDeviceName:  "麦克风 (USB2.0 MIC)"
+    AVInputFormat *inputFmt = av_find_input_format("dshow");
+    QString micphoneName = Utils::GetMicrophoneDeviceName();
+
+    ret = avformat_open_input(&m_pAudioFmtCtx, micphoneName.toStdString().c_str(), inputFmt, NULL);
+    if (ret < 0) {
+        qDebug() << "Can not open audio input stream";
+        return ret;
+    }
+
+    if (avformat_find_stream_info(m_pAudioFmtCtx, NULL) < 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < m_pAudioFmtCtx->nb_streams; ++i) {
+        AVStream *stream = m_pAudioFmtCtx->streams[i];
+        if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            decoder = avcodec_find_decoder(stream->codecpar->codec_id);
+            qDebug() << "Audio decoder id: " << stream->codecpar->codec_id << " name: " << decoder->name;
+        }
+    }
+
     return ret;
 }
 
