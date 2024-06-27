@@ -6,6 +6,9 @@
 extern "C" {
 
 #include "libavformat/avformat.h"
+#include "libswscale/swscale.h"
+#include "libswresample/swresample.h"
+
 }
 
 class AVRecordLive : public QObject
@@ -48,6 +51,9 @@ private:
 
     AVCodecContext *m_videoDecodecCtx = NULL;
     AVCodecContext *m_audioDecodecCtx = NULL;
+
+    SwsContext *m_videoSwsCtx = NULL;   // 视频颜色空间转换，缩放
+    SwrContext *m_audioSwrCtx = NULL;   // 音频重采样
 
     int m_videoIndex = -1;
     int m_audioIndex = -1;

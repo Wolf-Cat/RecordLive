@@ -107,6 +107,15 @@ int AVRecordLive::OpenVideoDevice()
         return -1;
     }
 
+    // 源宽高像素格式
+    m_videoSwsCtx = sws_getContext(m_videoDecodecCtx->width, m_videoDecodecCtx->height, m_videoDecodecCtx->pix_fmt,
+                   m_videoWidth, m_videoHeight, AV_PIX_FMT_YUV420P,   // 目标宽高像素格式
+                   SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
+
+    // 源参数：2560,1440 , 28:AV_PIX_FMT_BGRA
+    qDebug() << "swr video width, height: " << m_videoDecodecCtx->width << "," << m_videoDecodecCtx->height
+             << "pix_fmt: " << m_videoDecodecCtx->pix_fmt;
+
     return ret;
 }
 
