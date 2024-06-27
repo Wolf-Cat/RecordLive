@@ -48,6 +48,9 @@ private:
 
     AVCodecContext *m_videoDecodecCtx = NULL;
     AVCodecContext *m_audioDecodecCtx = NULL;
+
+    int m_videoIndex = -1;
+    int m_audioIndex = -1;
 };
 
 #endif // AVRECORDLIVE_H

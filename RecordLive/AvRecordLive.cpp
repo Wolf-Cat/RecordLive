@@ -78,7 +78,33 @@ int AVRecordLive::OpenVideoDevice()
     }
 
     for (int i = 0; i < m_pVideoFmtCtx->nb_streams; ++i) {
-        int  a = 0;
+        AVStream *stream = m_pVideoFmtCtx->streams[i];
+
+        // AV_CODEC_ID_H264 = 27, AV_CODEC_ID_BMP = 78
+        if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            qDebug () << "video Id:" << stream->codecpar->codec_id;
+            decoder = avcodec_find_decoder(stream->codecpar->codec_id);
+            if (decoder == NULL) {
+                qDebug () << "Can not found decoder";
+            }
+
+            // 从视频流中拷贝参数到codecCtx
+            m_videoDecodecCtx = avcodec_alloc_context3(decoder);
+            ret = avcodec_parameters_to_context(m_videoDecodecCtx, stream->codecpar);
+            if (ret < 0) {
+                qDebug () << "Video codec parameters to context: retcode = " << ret;
+                return -1;
+            }
+
+            m_videoIndex = i;
+            break;
+        }
+    }
+
+    // 根据编码器上下文打开
+    if (avcodec_open2(m_videoDecodecCtx, decoder, nullptr) < 0) {
+        qDebug() << "Can not open video codec";
+        return -1;
     }
 
     return ret;
