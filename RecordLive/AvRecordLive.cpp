@@ -129,7 +129,7 @@ int AVRecordLive::OpenAudioDevice()
 
     // MicrophoneDeviceName:  "麦克风 (USB2.0 MIC)"
     AVInputFormat *inputFmt = av_find_input_format("dshow");
-    QString micphoneName = Utils::GetMicrophoneDeviceName();
+    QString micphoneName = "audio=" + Utils::GetMicrophoneDeviceName();
 
     ret = avformat_open_input(&m_pAudioFmtCtx, micphoneName.toStdString().c_str(), inputFmt, NULL);
     if (ret < 0) {
@@ -146,7 +146,28 @@ int AVRecordLive::OpenAudioDevice()
         if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             decoder = avcodec_find_decoder(stream->codecpar->codec_id);
             qDebug() << "Audio decoder id: " << stream->codecpar->codec_id << " name: " << decoder->name;
+            // Audio decoder id:  65536  name:  pcm_s16le
+
+            if (decoder == NULL) {
+                qDebug() << "Codec not found";
+                return -1;
+            }
+
+            m_audioDecodecCtx = avcodec_alloc_context3(decoder);
+            ret = avcodec_parameters_to_context(m_audioDecodecCtx, stream->codecpar);
+            if (ret < 0) {
+                qDebug() << "Audio avcodec_parameters_to_context failed, errCode = " << ret;
+                return ret;
+            }
+
+            m_audioIndex = i;
+            break;
         }
+    }
+
+    if (avcodec_open2(m_audioDecodecCtx, decoder, NULL) < 0) {
+        qDebug() << "Can not find or open audio decoder";
+        return -1;
     }
 
     return ret;
