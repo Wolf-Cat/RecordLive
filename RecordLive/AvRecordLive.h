@@ -27,8 +27,9 @@ public slots:
     void Stop();
 
 private:
-    int OpenVideoDevice();
-    int OpenAudioDevice();
+    int OpenVideoDevice();   // 打开摄像头
+    int OpenAudioDevice();   // 打开麦克风
+    int OpenOutput();        // 初始化输出流
 
     void MuxerProcessThread();   // 音频和视频复用线程
     void VideoRecordThread();    // 视频流录制线程
@@ -45,9 +46,9 @@ private:
     int m_offsetx = 0;    // 抓取视频左上角点的X
     int m_offsety = 0;        // 抓取视频左上角点的Y
 
+// 输入流相关
     AVFormatContext *m_pVideoFmtCtx = NULL;
     AVFormatContext *m_pAudioFmtCtx = NULL;
-    AVFormatContext *m_pOutFmtCtx = NULL;     // 输出文件
 
     AVCodecContext *m_videoDecodecCtx = NULL;
     AVCodecContext *m_audioDecodecCtx = NULL;
@@ -55,8 +56,16 @@ private:
     SwsContext *m_videoSwsCtx = NULL;   // 视频颜色空间转换，缩放
     SwrContext *m_audioSwrCtx = NULL;   // 音频重采样
 
-    int m_videoIndex = -1;
-    int m_audioIndex = -1;
+    int m_videoIndex = -1;    // 桌面输入视频流索引
+    int m_audioIndex = -1;    // 麦克风输入音频流索引
+
+// 输出流相关
+    AVFormatContext *m_pOutFmtCtx = NULL;     // 输出文件
+    int m_outVideoIndex= -1;    // 输出文件的上下文中视频流索引
+    int m_outAudioIndex = -1;   // 输出文件的上下文中音频流索引
+
+    AVCodecContext *m_outVideoEncodecCtx = NULL;   // 视频输出流编码器上下文
+    AVCodecContext *m_outAudioEnCodecCtx = NULL;   // 音频输出流编码器上下文
 };
 
 #endif // AVRECORDLIVE_H

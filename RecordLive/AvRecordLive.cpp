@@ -45,6 +45,11 @@ void AVRecordLive::Start()
         qDebug() << "Open Audio device failed";
         return;
     }
+
+    if (OpenOutput() < 0) {
+        qDebug() << "Open OpenOutput device failed";
+        return;
+    }
 }
 
 void AVRecordLive::Stop()
@@ -168,6 +173,98 @@ int AVRecordLive::OpenAudioDevice()
     if (avcodec_open2(m_audioDecodecCtx, decoder, NULL) < 0) {
         qDebug() << "Can not find or open audio decoder";
         return -1;
+    }
+
+    return ret;
+}
+
+int AVRecordLive::OpenOutput()
+{
+    int ret = -1;
+
+    AVStream *videoStream = NULL;
+    AVStream *audioStream = NULL;
+
+    const char *outFilePath = m_filePath.toStdString().c_str();
+    if (m_filePath.toLower().endsWith(".flv") ||             // FLV存储或者RTMP推流
+         m_filePath.toLower().startsWith("rtmp://")) {
+        ret = avformat_alloc_output_context2(&m_pOutFmtCtx, NULL, "flv", outFilePath);
+    } else {
+        // 其余格式：MP4, ts, mkv等
+        ret = avformat_alloc_output_context2(&m_pOutFmtCtx, NULL, NULL, outFilePath);
+    }
+
+    if (ret < 0) {
+        qDebug() << "avformat_alloc_output_context failed";
+        return -1;
+    }
+
+    // 根据视频信息获取
+    if (m_pVideoFmtCtx->streams[m_videoIndex]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        videoStream = avformat_new_stream(m_pOutFmtCtx, NULL);
+        if (videoStream == NULL) {
+            qDebug() << "can not new video stream for output";
+            return -1;
+        }
+
+        // AVFormatContext第一个创建的流索引是0, 后续 + 1
+        m_outVideoIndex = videoStream->index;
+
+        // 视频流的时间基，一般都取帧率的倒数
+        videoStream->time_base = AVRational {1, m_fps};
+
+        m_outVideoEncodecCtx = avcodec_alloc_context3(NULL);
+
+        m_outVideoEncodecCtx->width = m_videoWidth;
+        m_outVideoEncodecCtx->height = m_videoHeight;
+        m_outVideoEncodecCtx->codec_type = AVMEDIA_TYPE_VIDEO;
+
+        // 编码器的时间基： 帧率的倒数
+        m_outVideoEncodecCtx->time_base.num = 1;
+        m_outVideoEncodecCtx->time_base.den = m_fps;
+
+        m_outVideoEncodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+        m_outVideoEncodecCtx->codec_id = AV_CODEC_ID_H264;
+
+        m_outVideoEncodecCtx->bit_rate = 800 * 1000;   // the average bitrate
+        m_outVideoEncodecCtx->rc_max_rate = 800 * 1000;
+        m_outVideoEncodecCtx->rc_buffer_size = 500 * 1000;
+
+        // 设置图像组层的大小，gop_size 越大，文件越小，因为gop越大，就会使得整个文件的I帧越少
+        m_outVideoEncodecCtx->gop_size = 30;
+
+        // maximum number of B-frames between non-B-frames
+        // Note: The output will be delayed by max_b_frames+1 relative to the input.
+        m_outVideoEncodecCtx->max_b_frames = 3;
+
+        // 设置H264中相关的参数，不设置的话 avcodec_open2会失败
+        m_outVideoEncodecCtx->qmin = 10;
+        m_outVideoEncodecCtx->qmax = 31;
+        m_outVideoEncodecCtx->max_qdiff = 4;
+        m_outVideoEncodecCtx->me_range = 16;
+        m_outVideoEncodecCtx->max_qdiff = 4;
+        m_outVideoEncodecCtx->qcompress = 0.6;
+
+        // 根据编码器ID查找对应的视频编码器
+        AVCodec *videoEncoder = avcodec_find_encoder(m_outVideoEncodecCtx->codec_id);
+        m_outVideoEncodecCtx->codec_tag = 0;
+
+        // 正确设置sps/pps
+        m_outVideoEncodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;  // Place global headers in extradata instead of every keyframe.
+
+        // 打开视频编码器
+        ret = avcodec_open2(m_outVideoEncodecCtx, videoEncoder, NULL);
+        if (ret < 0) {
+            qDebug() << "Can not open encoder, encoder id = " << videoEncoder->id << "ret = " << ret;
+            return ret;
+        }
+
+        // 将codecCtx 中的参数传给输出流
+        ret = avcodec_parameters_from_context(videoStream->codecpar, m_outVideoEncodecCtx);
+        if (ret < 0) {
+            qDebug() << "out video avcodec_parameters_from_context failed";
+            return -1;
+        }
     }
 
     return ret;
