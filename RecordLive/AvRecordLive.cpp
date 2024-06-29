@@ -351,6 +351,20 @@ int AVRecordLive::OpenOutput()
         }
     }
 
+    // 打开输出文件
+    if (m_pOutFmtCtx->oformat->flags & AVFMT_NOFILE) {
+        if (avio_open(&m_pOutFmtCtx->pb, outFilePath, AVIO_FLAG_WRITE) < 0) {
+            qDebug() << "avio_open failed, outFilePath:" << outFilePath;
+            return -1;
+        }
+    }
+
+    // 写文件头
+    if (avformat_write_header(m_pOutFmtCtx, NULL) < 0) {
+        qDebug() << "Can not write the header of the output file";
+        return -1;
+    }
+
     return ret;
 }
 
