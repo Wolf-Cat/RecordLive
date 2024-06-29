@@ -256,6 +256,7 @@ int AVRecordLive::OpenOutput()
         ret = avcodec_open2(m_outVideoEncodecCtx, videoEncoder, NULL);
         if (ret < 0) {
             qDebug() << "Can not open encoder, encoder id = " << videoEncoder->id << "ret = " << ret;
+            // Can not open encoder, encoder id =  27 ret =  -22,
             return ret;
         }
 
@@ -267,7 +268,90 @@ int AVRecordLive::OpenOutput()
         }
     }
 
+    // 音频输出流信息
+    if (m_pAudioFmtCtx->streams[m_audioIndex]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+        audioStream = avformat_new_stream(m_pOutFmtCtx, NULL);
+        m_outAudioIndex = audioStream->index;
+
+        AVCodec *audioEncoder = avcodec_find_decoder(AV_CODEC_ID_AAC);
+        m_outAudioEnCodecCtx = avcodec_alloc_context3(audioEncoder);
+        m_outAudioEnCodecCtx->sample_fmt = audioEncoder->sample_fmts ? audioEncoder->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+        m_outAudioEnCodecCtx->bit_rate = m_audioBitrate;
+        m_outAudioEnCodecCtx->sample_rate = 44100;
+
+        int supportSamplesRateCount = 0;
+        if (audioEncoder->supported_samplerates) {  // array of supported audio samplerates, or NULL if unknown, array is terminated by 0
+            m_outAudioEnCodecCtx->sample_rate = audioEncoder->supported_samplerates[0];
+            for (int i = 0; audioEncoder->supported_samplerates[i]; ++i) {
+                supportSamplesRateCount++;
+                if (audioEncoder->supported_samplerates[i] == 44100) {
+                    m_outAudioEnCodecCtx->sample_rate = 44100;
+                }
+            }
+        }
+
+        qDebug() << "supportSamplesRateCount : " << supportSamplesRateCount;
+
+        m_outAudioEnCodecCtx->channels = av_get_channel_layout_nb_channels(m_outAudioEnCodecCtx->channel_layout);
+        m_outAudioEnCodecCtx->channel_layout = AV_CH_LAYOUT_STEREO;   // 立体声
+
+        int channelLayouts = 0;
+        if (audioEncoder->channel_layouts) {
+            m_outAudioEnCodecCtx->channel_layout = audioEncoder->channel_layouts[0];
+            for (int i = 0; audioEncoder->channel_layouts[i]; ++i) {
+                if (audioEncoder->channel_layouts[i] == AV_CH_LAYOUT_STEREO) {
+                    m_outAudioEnCodecCtx->channel_layout = AV_CH_LAYOUT_STEREO;
+                    ++channelLayouts;
+                }
+            }
+        }
+
+        qDebug() << "audioEncoder->channel_layouts[i]:" << channelLayouts;
+
+        m_outAudioEnCodecCtx->channels = av_get_channel_layout_nb_channels(m_outAudioEnCodecCtx->channel_layout);
+        audioStream->time_base = AVRational {1, m_outAudioEnCodecCtx->sample_rate};
+
+        m_outAudioEnCodecCtx->codec_tag = 0;
+        m_outAudioEnCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+        audioEncoder->sample_fmts;
+        m_outAudioEnCodecCtx->sample_fmt;
+        if (!CheckSampleFmt(audioEncoder, m_outAudioEnCodecCtx->sample_fmt)) {
+            qDebug() << "Audio Encoder does not support sample format:" << av_get_sample_fmt_name(m_outAudioEnCodecCtx->sample_fmt);
+            return -1;
+        }
+
+        // 打开音频编码器
+        ret = avcodec_open2(m_outAudioEnCodecCtx, audioEncoder, NULL);
+        if (ret < 0) {
+            qDebug() << "Can not open the audio encoder, codecid=" << audioEncoder->id << " error code:" << ret;
+            return ret;
+        }
+
+        // 将CodecCtx中的参数传给音频输出流
+        ret = avcodec_parameters_from_context(audioStream->codecpar, m_outAudioEnCodecCtx);
+        if (ret < 0) {
+            qDebug() << "Output audio avcodec_parameters_from_context failed err code:" << ret;
+            return ret;
+        }
+    }
+
     return ret;
+}
+
+bool AVRecordLive::CheckSampleFmt(const AVCodec *codec, AVSampleFormat sampleFmt)
+{
+    const enum AVSampleFormat *pSampleFmt = codec->sample_fmts;
+
+    while (*pSampleFmt != AV_SAMPLE_FMT_NONE) {
+        if (*pSampleFmt == sampleFmt) {
+            return true;
+        }
+
+        pSampleFmt++;
+    }
+
+    return false;
 }
 
 void AVRecordLive::MuxerProcessThread()

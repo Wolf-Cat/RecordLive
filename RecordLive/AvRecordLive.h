@@ -31,6 +31,7 @@ private:
     int OpenAudioDevice();   // 打开麦克风
     int OpenOutput();        // 初始化输出流
 
+    bool CheckSampleFmt(const AVCodec *codec, enum AVSampleFormat sampleFmt);
     void MuxerProcessThread();   // 音频和视频复用线程
     void VideoRecordThread();    // 视频流录制线程
     void AudioRecordThread();    // 音频流录制线程
