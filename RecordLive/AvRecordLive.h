@@ -8,6 +8,7 @@ extern "C" {
 #include "libavformat/avformat.h"
 #include "libswscale/swscale.h"
 #include "libswresample/swresample.h"
+#include "libavutil/audio_fifo.h"
 
 }
 
@@ -36,6 +37,9 @@ private:
     void VideoRecordThread();    // 视频流录制线程
     void AudioRecordThread();    // 音频流录制线程
 
+    void InitVideoBuffer();
+    void InitAudioBuffer();
+
 private:
     bool m_isInited = false;
 
@@ -60,6 +64,9 @@ private:
     int m_videoIndex = -1;    // 桌面输入视频流索引
     int m_audioIndex = -1;    // 麦克风输入音频流索引
 
+    AVFifoBuffer *m_videoFifoBuffer = NULL;   // 视频共享队列
+    AVAudioFifo *m_audioFifoBuffer = NULL;    // 音频共享队列
+
 // 输出流相关
     AVFormatContext *m_pOutFmtCtx = NULL;     // 输出文件
     int m_outVideoIndex= -1;    // 输出文件的上下文中视频流索引
@@ -67,6 +74,15 @@ private:
 
     AVCodecContext *m_outVideoEncodecCtx = NULL;   // 视频输出流编码器上下文
     AVCodecContext *m_outAudioEnCodecCtx = NULL;   // 音频输出流编码器上下文
+
+    // 输出的视频方面
+    AVFrame *m_videoOutFrame = NULL;
+    uint8_t *m_videoOutFrameBuf = NULL;
+    int m_videoOutFrameSize = 0;
+
+    // 输出的音频方面
+    AVAudioFifo *m_outAudioFifoBuffer = NULL;
+    int m_outnbSamplesPeerFrame = 0;
 };
 
 #endif // AVRECORDLIVE_H

@@ -4,6 +4,7 @@
 
 extern "C" {
 #include "libavdevice/avdevice.h"
+#include "libavutil/imgutils.h"
 }
 
 AVRecordLive::AVRecordLive(QObject *parent) : QObject(parent)
@@ -50,6 +51,9 @@ void AVRecordLive::Start()
         qDebug() << "Open OpenOutput device failed";
         return;
     }
+
+    InitVideoBuffer();
+    InitAudioBuffer();
 }
 
 void AVRecordLive::Stop()
@@ -396,4 +400,30 @@ void AVRecordLive::VideoRecordThread()
 void AVRecordLive::AudioRecordThread()
 {
 
+}
+
+void AVRecordLive::InitVideoBuffer()
+{
+    m_videoOutFrameSize = av_image_get_buffer_size(m_outVideoEncodecCtx->pix_fmt,
+                                                   m_videoWidth, m_videoHeight, 1);
+    m_videoOutFrameBuf = (uint8_t *)av_malloc(m_videoOutFrameSize);
+    m_videoOutFrame = av_frame_alloc();
+
+    // 先让AVFrame指针指向buf, 后面再写入数据到buf
+    av_image_fill_arrays(m_videoOutFrame->data, m_videoOutFrame->linesize, m_videoOutFrameBuf,
+                         m_outVideoEncodecCtx->pix_fmt, m_videoWidth, m_videoHeight, 1);
+    // 申请30帧缓存
+    m_videoFifoBuffer = av_fifo_alloc_array(30, m_videoOutFrameSize);
+}
+
+void AVRecordLive::InitAudioBuffer()
+{
+    m_outnbSamplesPeerFrame = m_outAudioEnCodecCtx->frame_size;
+    if (m_outnbSamplesPeerFrame == 0) {
+        m_outnbSamplesPeerFrame = 1024;
+    }
+
+    // 申请30帧缓存
+    m_audioFifoBuffer = av_audio_fifo_alloc(m_outAudioEnCodecCtx->sample_fmt,
+                                            m_outAudioEnCodecCtx->channels, 30 * m_outnbSamplesPeerFrame);
 }
