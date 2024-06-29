@@ -334,6 +334,21 @@ int AVRecordLive::OpenOutput()
             qDebug() << "Output audio avcodec_parameters_from_context failed err code:" << ret;
             return ret;
         }
+
+        // 音频重采样初始化
+        m_audioSwrCtx = swr_alloc();
+        av_opt_set_int(m_audioSwrCtx, "in_channel_count", m_audioDecodecCtx->channels, 0);
+        av_opt_set_int(m_audioSwrCtx, "in_sample_rate", m_audioDecodecCtx->sample_rate, 0);
+        av_opt_set_sample_fmt(m_audioSwrCtx, "in_sample_fmt", m_audioDecodecCtx->sample_fmt, 0);
+
+        av_opt_set_int(m_audioSwrCtx, "out_channel_count", m_outAudioEnCodecCtx->channels, 0);
+        av_opt_set_int(m_audioSwrCtx, "out_sample_rate", m_outAudioEnCodecCtx->sample_rate, 0);
+        av_opt_set_int(m_audioSwrCtx, "out_sample_fmt", m_outAudioEnCodecCtx->sample_rate, 0);
+
+        if (swr_init(m_audioSwrCtx) < 0) {
+            qDebug() << "swr init failed";
+            return -1;
+        }
     }
 
     return ret;
