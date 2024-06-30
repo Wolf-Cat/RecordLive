@@ -484,7 +484,89 @@ void AVRecordLive::VideoRecordThread()
 
 void AVRecordLive::AudioRecordThread()
 {
+    int ret = -1;
+    AVPacket pkt;
+    av_init_packet(&pkt);
 
+    int nbSamples = m_outnbSamplesPeerFrame;
+    int dstNbSamples = 0;
+    int maxDstNbSamples = 0;
+
+    AVFrame *oldFrame = av_frame_alloc();
+    AVFrame *newFrame;
+
+    // 重新计算(rescale)并且取整(round)方便我们记忆 a * b / c
+    maxDstNbSamples = av_rescale_rnd(nbSamples, m_outAudioEnCodecCtx->sample_rate,
+                      m_audioDecodecCtx->sample_rate, AV_ROUND_UP);
+    dstNbSamples = maxDstNbSamples;
+
+    while (m_state != RecordState::STOP) {
+        if (av_read_frame(m_pAudioFmtCtx, &pkt) < 0) {
+            qDebug() << "audio av_read_frame < 0";
+            continue;
+        }
+
+        if (pkt.stream_index != m_audioIndex) {
+            av_packet_unref(&pkt);
+            continue;
+        }
+
+        ret = avcodec_send_packet(m_audioDecodecCtx, &pkt);
+        if (ret < 0) {
+            qDebug() << "audio avcodec_send_packet failed, ret:" << ret;
+            av_packet_unref(&pkt);
+            continue;
+        }
+
+        ret = avcodec_receive_frame(m_audioDecodecCtx, oldFrame);
+        if (ret < 0) {
+            qDebug() << "audio avcodec_receive_frame failed, ret: " << ret;
+            av_packet_unref(&pkt);
+            continue;
+        }
+
+        // swr_get_delay, 计算积压的延迟数据
+        dstNbSamples = av_rescale_rnd(swr_get_delay(m_audioSwrCtx, m_audioDecodecCtx->sample_rate) + oldFrame->nb_samples,
+                    m_outAudioEnCodecCtx->sample_rate, m_audioDecodecCtx->sample_rate, AV_ROUND_UP);
+
+        if (dstNbSamples > maxDstNbSamples) {
+            qDebug() << "audio new frame realloc";
+            av_freep(&newFrame->data[0]);
+            ret = av_samples_alloc(newFrame->data, newFrame->linesize, m_outAudioEnCodecCtx->channels,
+                                  dstNbSamples, m_outAudioEnCodecCtx->sample_fmt, 1);
+            if (ret < 0) {
+                qDebug() << "av_samples_alloc failed";
+                return;
+            }
+
+            maxDstNbSamples = dstNbSamples;
+            m_outAudioEnCodecCtx->frame_size = dstNbSamples;
+            m_outnbSamplesPeerFrame = newFrame->nb_samples; // 1024
+        }
+
+        // 音频重采样
+        newFrame->nb_samples = swr_convert(m_audioSwrCtx, newFrame->data, dstNbSamples,
+                       (const uint8_t **)oldFrame->data, oldFrame->nb_samples);
+
+        if (newFrame->nb_samples < 0) {
+            qDebug() << "swr_convert failed err:" << newFrame->nb_samples;
+            return;
+        }
+
+        {
+            std::unique_lock<std::mutex> uniquelk(m_mutexAudioBuf);
+            m_cvAudioBufNotFull.wait(uniquelk, [newFrame, this] {
+                return av_audio_fifo_space(m_audioFifoBuffer) >= newFrame->nb_samples;
+            });
+        }
+
+        if (av_audio_fifo_write(m_audioFifoBuffer, (void **)newFrame->data, newFrame->nb_samples) < newFrame->nb_samples) {
+            qDebug() << "av_audio_fifo_write failed";
+            return;
+        }
+
+        m_cvAudioBufNotEmpty.notify_one();
+    }
 }
 
 void AVRecordLive::InitVideoBuffer()
