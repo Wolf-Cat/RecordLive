@@ -1,6 +1,8 @@
 #include "AvRecordLive.h"
 #include "Utils.h"
 #include <QDebug>
+#include <thread>
+#include <QThread>
 
 extern "C" {
 #include "libavdevice/avdevice.h"
@@ -54,6 +56,9 @@ void AVRecordLive::Start()
 
     InitVideoBuffer();
     InitAudioBuffer();
+
+    std::thread muxerThread(&AVRecordLive::MuxerProcessThread, this);
+    muxerThread.detach();
 }
 
 void AVRecordLive::Stop()
@@ -389,7 +394,17 @@ bool AVRecordLive::CheckSampleFmt(const AVCodec *codec, AVSampleFormat sampleFmt
 
 void AVRecordLive::MuxerProcessThread()
 {
+    std::thread videoRecordThread(&AVRecordLive::VideoRecordThread, this);
+    std::thread audioRecordThread(&AVRecordLive::AudioRecordThread, this);
+    videoRecordThread.detach();
+    audioRecordThread.detach();
 
+    QThread::msleep(200);
+
+    // 从共享队列中读取数据，然后编码，存储或直播推流
+    while(1) {
+
+    }
 }
 
 void AVRecordLive::VideoRecordThread()
