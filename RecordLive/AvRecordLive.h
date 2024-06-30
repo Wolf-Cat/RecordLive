@@ -2,6 +2,8 @@
 #define AVRECORDLIVE_H
 
 #include <QObject>
+#include <mutex>
+#include <condition_variable>
 
 extern "C" {
 
@@ -11,6 +13,13 @@ extern "C" {
 #include "libavutil/audio_fifo.h"
 
 }
+
+enum RecordState {
+    UNKONOW = -1,
+    START,
+    PAUSED,
+    STOP
+};
 
 class AVRecordLive : public QObject
 {
@@ -42,6 +51,7 @@ private:
 
 private:
     bool m_isInited = false;
+    RecordState m_state;
 
     QString m_filePath;
     int m_videoWidth = 0;
@@ -65,7 +75,14 @@ private:
     int m_audioIndex = -1;    // 麦克风输入音频流索引
 
     AVFifoBuffer *m_videoFifoBuffer = NULL;   // 视频共享队列
+    std::condition_variable m_cvVideoBufNotFull;
+    std::condition_variable m_cvVideoBufNotEmpty;
+    std::mutex m_mutexVideoBuf;
+
     AVAudioFifo *m_audioFifoBuffer = NULL;    // 音频共享队列
+    std::condition_variable m_cvAudioBufNotFull;
+    std::condition_variable m_cvAudioBufNotEmpty;
+    std::mutex m_mutexAudioBuf;
 
 // 输出流相关
     AVFormatContext *m_pOutFmtCtx = NULL;     // 输出文件

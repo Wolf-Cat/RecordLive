@@ -57,8 +57,11 @@ void AVRecordLive::Start()
     InitVideoBuffer();
     InitAudioBuffer();
 
-    std::thread muxerThread(&AVRecordLive::MuxerProcessThread, this);
-    muxerThread.detach();
+    if (m_state != RecordState::START) {
+        m_state = RecordState::START;
+        std::thread muxerThread(&AVRecordLive::MuxerProcessThread, this);
+        muxerThread.detach();
+    }
 }
 
 void AVRecordLive::Stop()
@@ -409,7 +412,72 @@ void AVRecordLive::MuxerProcessThread()
 
 void AVRecordLive::VideoRecordThread()
 {
+    int ret = -1;
+    AVPacket pkt;
+    av_init_packet(&pkt);
 
+    int pixNumPeerFrame = m_videoWidth * m_videoHeight;
+    AVFrame *oldFrame = av_frame_alloc();  // 桌面视频帧（bmp）送给解码器，解压之后的AVFrame(rgb)
+    AVFrame *newFrame = av_frame_alloc();  // 颜色空间转换，缩放
+
+    // 转为的YUV420P一帧的字节数
+    int newFrameBufSize = av_image_get_buffer_size(m_outVideoEncodecCtx->pix_fmt, m_videoWidth, m_videoHeight, 1);
+    uint8_t *newFrameBuf = (uint8_t *)av_malloc(newFrameBufSize);
+    av_image_fill_arrays(newFrame->data, newFrame->linesize, newFrameBuf,
+                 m_outVideoEncodecCtx->pix_fmt, m_videoWidth, m_videoHeight, 1);
+
+    // 循环处理屏幕的每一帧数据
+    while (m_state != RecordState::STOP) {
+        ret = av_read_frame(m_pVideoFmtCtx, &pkt);
+        if (ret < 0) {
+            qDebug() << "VideoRecordThread av_read_frame < 0, ret = " << ret;
+            continue;
+        }
+
+        if (pkt.stream_index != m_videoIndex) {
+            qDebug() << "read not a video packet";
+            av_packet_unref(&pkt);
+            continue;
+        }
+
+        // 将包发给解码器
+        ret = avcodec_send_packet(m_videoDecodecCtx, &pkt);
+        if (ret != 0) {
+            qDebug() << "video avcodec_send_packet failed, ret=" << ret;
+            av_packet_unref(&pkt);
+            continue;
+        }
+
+        // 从解码器拿到解码数据帧AVFrame后（不是YUV420P, 桌面帧格式是RGBA）
+        ret = avcodec_receive_frame(m_videoDecodecCtx, oldFrame);
+        if (ret != 0) {
+            qDebug() << "video avcodec_receive_frame failed, ret:" << ret;
+            av_packet_unref(&pkt);
+            continue;
+        }
+
+        // 颜色空间转换，将AV_PIX_FMT_RGBA转为AV_PIX_FMT_YUV420P
+        sws_scale(m_videoSwsCtx, (const uint8_t* const*)oldFrame->data, oldFrame->linesize, 0,
+                  m_outVideoEncodecCtx->height, newFrame->data, newFrame->linesize);
+
+        {
+            std::unique_lock<std::mutex> uniquelk(m_mutexVideoBuf);
+            // 条件：判断队列中是否足够容纳一帧大小的空间 （之前设置的是30帧的大小缓存）
+            // 如果不够则一直阻塞等待
+            m_cvVideoBufNotFull.wait(uniquelk, [this] {
+                return av_fifo_space(m_videoFifoBuffer) >= m_videoOutFrameSize;
+            });
+
+            av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[0], pixNumPeerFrame, NULL);
+            av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
+            av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
+
+            // 此时已经写入一帧数据，队列不为空
+            m_cvVideoBufNotEmpty.notify_one();
+
+            av_packet_unref(&pkt);
+        }
+    }
 }
 
 void AVRecordLive::AudioRecordThread()
