@@ -467,17 +467,19 @@ void AVRecordLive::VideoRecordThread()
             m_cvVideoBufNotFull.wait(uniquelk, [this] {
                 return av_fifo_space(m_videoFifoBuffer) >= m_videoOutFrameSize;
             });
-
-            av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[0], pixNumPeerFrame, NULL);
-            av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
-            av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
-
-            // 此时已经写入一帧数据，队列不为空
-            m_cvVideoBufNotEmpty.notify_one();
-
-            av_packet_unref(&pkt);
         }
+
+        av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[0], pixNumPeerFrame, NULL);
+        av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
+        av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
+
+        // 此时已经写入一帧数据，队列不为空
+        m_cvVideoBufNotEmpty.notify_one();
+
+        av_packet_unref(&pkt);
     }
+
+    // TODO: 线程结束时候的剩余数据的释放问题
 }
 
 void AVRecordLive::AudioRecordThread()
