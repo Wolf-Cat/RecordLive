@@ -22,6 +22,7 @@ void AVRecordLive::Init()
 
     m_isInited = true;
     m_filePath = "Record.flv";
+    m_fps = 5;
     m_videoWidth = 1280;
     m_videoHeight = 720;
     m_audioBitrate = 128000;
