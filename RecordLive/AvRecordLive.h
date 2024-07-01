@@ -49,6 +49,8 @@ private:
     void InitVideoBuffer();
     void InitAudioBuffer();
 
+    AVFrame* AllocAudioByAVCodecCtx(AVCodecContext* ctx, int nbSamples);
+
 private:
     bool m_isInited = false;
     RecordState m_state;

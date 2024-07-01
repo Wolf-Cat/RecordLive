@@ -638,7 +638,7 @@ void AVRecordLive::AudioRecordThread()
     int maxDstNbSamples = 0;
 
     AVFrame *oldFrame = av_frame_alloc();
-    AVFrame *newFrame;
+    AVFrame *newFrame = AllocAudioByAVCodecCtx(m_outAudioEnCodecCtx, nbSamples);
 
     // 重新计算(rescale)并且取整(round)方便我们记忆 a * b / c
     maxDstNbSamples = av_rescale_rnd(nbSamples, m_outAudioEnCodecCtx->sample_rate,
@@ -738,4 +738,34 @@ void AVRecordLive::InitAudioBuffer()
     // 申请30帧缓存
     m_audioFifoBuffer = av_audio_fifo_alloc(m_outAudioEnCodecCtx->sample_fmt,
                                             m_outAudioEnCodecCtx->channels, 30 * m_outnbSamplesPeerFrame);
+}
+
+AVFrame *AVRecordLive::AllocAudioByAVCodecCtx(AVCodecContext *ctx, int nbSamples)
+{
+    if (ctx == NULL) {
+        return NULL;
+    }
+
+    AVFrame *frame = av_frame_alloc();
+    int ret = -1;
+
+    frame->format = ctx->sample_fmt;
+    frame->channel_layout = ctx->channel_layout ? ctx->channel_layout : AV_CH_LAYOUT_STEREO;
+    frame->sample_rate = ctx->sample_rate;
+    frame->nb_samples = nbSamples;
+
+    if (nbSamples > 0) {
+        /*
+        The following fields must be set on frame before calling this function:
+         * - format (pixel format for video, sample format for audio)
+         * - width and height for video
+         * - nb_samples and channel_layout for audio
+        */
+        ret = av_frame_get_buffer(frame, 0);
+        if (ret < 0) {
+            qDebug() << "AllocAudioByAVCodecCtx av_frame_get_buffer failed:" << ret;
+        }
+    }
+
+    return frame;
 }
