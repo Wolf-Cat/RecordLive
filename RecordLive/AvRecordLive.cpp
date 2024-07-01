@@ -431,7 +431,7 @@ void AVRecordLive::MuxerProcessThread()
                 break;
             }
 
-            // 比较音视频pts, 大于0表示视频帧再前，音频还需要连续编码
+            // 比较音视频pts, 大于0表示视频帧在前，音频还需要连续编码
             // 小于0表示，音频帧在前，此时至少编码一帧视频
             if (av_compare_ts(m_videoCurPts, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base,
                               m_audioCurPts, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base) <= 0)
@@ -493,6 +493,60 @@ void AVRecordLive::MuxerProcessThread()
                 }
 
                 av_packet_unref(&outPacket);
+
+            } else {    // 视频帧pts，在前面，此时音频需要编码
+                if (isDone) {
+                    std::lock_guard<std::mutex> lk(m_mutexAudioBuf);
+                    if (av_audio_fifo_size(m_audioFifoBuffer) < m_outnbSamplesPeerFrame) {
+                        m_audioCurPts = INT_MAX;
+                        continue;
+                    }
+                } else {
+                    std::unique_lock<std::mutex> lk(m_mutexAudioBuf);
+                    m_cvAudioBufNotEmpty.wait(lk, [this] {return av_audio_fifo_size(m_audioFifoBuffer) >= m_outnbSamplesPeerFrame;});
+                }
+
+                int ret = -1;
+                AVFrame *audioFrame = av_frame_alloc();
+                audioFrame->nb_samples = m_outnbSamplesPeerFrame;
+                audioFrame->channel_layout = m_outAudioEnCodecCtx->channel_layout;
+                audioFrame->format = m_outAudioEnCodecCtx->sample_fmt;
+                audioFrame->sample_rate = m_outAudioEnCodecCtx->sample_rate;
+                audioFrame->pts = m_outnbSamplesPeerFrame * audioFrameIndex++;
+
+                // 分配databuf
+                ret = av_frame_get_buffer(audioFrame, 0);
+                av_audio_fifo_read(m_audioFifoBuffer, (void **)audioFrame->data, m_outnbSamplesPeerFrame);
+                m_cvAudioBufNotFull.notify_one();
+
+                AVPacket pkt;
+                av_init_packet(&pkt);
+                ret = avcodec_send_frame(m_outAudioEnCodecCtx, audioFrame);
+                if (ret != 0) {
+                    /*
+                    AVERROR（EAGAIN）值为-11.
+                    返回值为-11意味着需要新的输入数据才能返回新的输出。AAC默认是两帧
+                    在解码或编码开始时，编解码器可能会接收多个输入帧/数据包而不返回帧，直到其内部缓冲区被填充为止。
+                    AVERROR(EINVAL): 值为-22. 意味着编码器打开失败
+                    */
+                    qDebug() << "audio avcodec_send_frame failed, ret: " << ret;
+                    av_frame_free(&audioFrame);
+                    av_packet_unref(&pkt);
+                    continue;
+                }
+
+                pkt.stream_index = m_outAudioIndex;
+
+                av_packet_rescale_ts(&pkt, m_outAudioEnCodecCtx->time_base, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base);
+                m_audioCurPts = pkt.pts;
+
+                ret = av_interleaved_write_frame(m_pOutFmtCtx, &pkt);
+                if (ret != 0) {
+                    qDebug() << "audio av_interleaved_write_frame failed, ret: " << ret;
+                }
+
+                av_frame_free(&audioFrame);
+                av_packet_unref(&pkt);
             }
         }
     }
