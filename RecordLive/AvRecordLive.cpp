@@ -356,11 +356,12 @@ int AVRecordLive::OpenOutput()
 
         av_opt_set_int(m_audioSwrCtx, "out_channel_count", m_outAudioEnCodecCtx->channels, 0);
         av_opt_set_int(m_audioSwrCtx, "out_sample_rate", m_outAudioEnCodecCtx->sample_rate, 0);
-        av_opt_set_int(m_audioSwrCtx, "out_sample_fmt", m_outAudioEnCodecCtx->sample_rate, 0);
+        av_opt_set_int(m_audioSwrCtx, "out_sample_fmt", m_outAudioEnCodecCtx->sample_fmt, 0);
 
-        if (swr_init(m_audioSwrCtx) < 0) {
-            qDebug() << "swr init failed";
-            return -1;
+        ret = swr_init(m_audioSwrCtx);
+        if (ret < 0) {
+            qDebug() << "swr init failed: ret = " << ret;
+            return ret;
         }
     }
 
