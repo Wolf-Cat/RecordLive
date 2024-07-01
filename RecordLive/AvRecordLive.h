@@ -96,10 +96,12 @@ private:
     AVFrame *m_videoOutFrame = NULL;
     uint8_t *m_videoOutFrameBuf = NULL;
     int m_videoOutFrameSize = 0;
+    int64_t m_videoCurPts = 0;
 
     // 输出的音频方面
     AVAudioFifo *m_outAudioFifoBuffer = NULL;
     int m_outnbSamplesPeerFrame = 0;
+    int64_t m_audioCurPts = 0;
 };
 
 #endif // AVRECORDLIVE_H

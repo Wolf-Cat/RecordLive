@@ -404,9 +404,97 @@ void AVRecordLive::MuxerProcessThread()
 
     QThread::msleep(200);
 
+    bool isDone = false;
+    int videoFrameIndex = 0;
+    int audioFrameIndex = 0;
+    int ret = -1;
+
     // 从共享队列中读取数据，然后编码，存储或直播推流
     while(1) {
+        if (m_state == RecordState::STOP && !isDone) {
+            isDone = true;
+        }
 
+        if (isDone) {
+            // 用这个defer_lock的前提是你不能自己先把mutex给lock()，否则会报异常
+            // defer_lock的意思就是并没有给mutex加锁，只初始化了一个没有加锁的mutex
+            std::unique_lock<std::mutex> vBufLock(m_mutexVideoBuf, std::defer_lock);
+            std::unique_lock<std::mutex> aBufLock(m_mutexAudioBuf, std::defer_lock);
+
+            // std::lock()可以一次锁住两个或者两个以上的互斥量。(最少锁两个)
+            // 优点：它不存在这种因为多个线程中因为锁的顺序问题导致死锁的风险问题。
+            std::lock(vBufLock, aBufLock);
+            if (av_fifo_size(m_videoFifoBuffer) < m_videoOutFrameSize &&
+                 av_audio_fifo_size(m_audioFifoBuffer) < m_outnbSamplesPeerFrame)
+            {
+                qDebug() << "Both video and audio fifo buf are empty";
+                break;
+            }
+
+            // 比较音视频pts, 大于0表示视频帧再前，音频还需要连续编码
+            // 小于0表示，音频帧在前，此时至少编码一帧视频
+            if (av_compare_ts(m_videoCurPts, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base,
+                              m_audioCurPts, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base) <= 0)
+            {
+                if (isDone) {
+                    std::lock_guard<std::mutex> lockguard(m_mutexVideoBuf);
+                    if (av_fifo_size(m_videoFifoBuffer) < m_videoOutFrameSize) {
+                        m_videoCurPts = INT_MAX;   // 0x7ffffffffffffffe
+                        continue;
+                    }
+                } else {
+                    std::unique_lock<std::mutex> uniqueLock(m_mutexVideoBuf);
+                    m_cvVideoBufNotEmpty.wait(uniqueLock, [this] {return av_fifo_size(m_videoFifoBuffer) >= m_videoOutFrameSize;});
+                }
+
+                // 从队列中拿出一帧，开始编码
+                av_fifo_generic_read(m_videoFifoBuffer, m_videoOutFrameBuf, m_videoOutFrameSize, NULL);
+
+                // 已拿出一帧，队列肯定不满了
+                m_cvVideoBufNotFull.notify_one();
+
+                // 设置视频帧参数
+                m_videoOutFrame->pts = videoFrameIndex++;
+                m_videoOutFrame->format = m_outVideoEncodecCtx->pix_fmt;
+                m_videoOutFrame->width = m_outVideoEncodecCtx->width;
+                m_videoOutFrame->height = m_outVideoEncodecCtx->height;
+
+                AVPacket outPacket;
+                av_init_packet(&outPacket);
+
+                // 将拿出来的YUV420P帧，设定pts发给编码器
+                ret = avcodec_send_frame(m_outVideoEncodecCtx, m_videoOutFrame);
+                if (ret != 0) {
+                    qDebug () << "out video avcodec_send_frame failed, ret=" <<ret;
+                    av_packet_unref(&outPacket);
+                }
+
+                // 从编码器读取编码压缩后的包AVPacket
+                ret = avcodec_receive_packet(m_outVideoEncodecCtx, &outPacket);
+                if (ret != 0) {
+                    qDebug() << "video avcodec_receive_packet failed, ret:" << ret;
+                    av_packet_unref(&outPacket);
+                    continue;
+                }
+
+                outPacket.stream_index = m_outVideoIndex;
+
+                // 将pts从编码层的timebase转成封装层的time_base
+                // 该函数通过计算两个时间基之间的比例，对AVPacket中的pts(显示时间戳)和dts(解码时间戳)进行相应的缩放。
+                // 这对于确保媒体处理管道中各环节的时间戳一致性至关重要
+                av_packet_rescale_ts(&outPacket, m_outVideoEncodecCtx->time_base, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base);
+                m_videoCurPts = outPacket.pts;
+                qDebug() << "m_videoCurPts:" << m_videoCurPts;
+
+                // 向数据包写入输出的媒体文件
+                ret = av_interleaved_write_frame(m_pOutFmtCtx, &outPacket);
+                if (ret != 0) {
+                    qDebug() << "video av_interleaved_write_frame failed, ret:" << ret;
+                }
+
+                av_packet_unref(&outPacket);
+            }
+        }
     }
 }
 
