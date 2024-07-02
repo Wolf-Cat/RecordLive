@@ -431,7 +431,7 @@ void AVRecordLive::MuxerProcessThread()
                  av_audio_fifo_size(m_audioFifoBuffer) < m_outnbSamplesPeerFrame)
             {
                 qDebug() << "Both video and audio fifo buf are empty";
-                break;
+                continue;
             }
          }
 
