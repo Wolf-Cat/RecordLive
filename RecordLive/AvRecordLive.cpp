@@ -21,7 +21,7 @@ void AVRecordLive::Init()
     }
 
     m_isInited = true;
-    m_filePath = "Record.flv";
+    m_filePath = "rtmp://127.0.0.1:1935/live/test1";
     m_fps = 5;
     m_videoWidth = 1280;
     m_videoHeight = 720;
