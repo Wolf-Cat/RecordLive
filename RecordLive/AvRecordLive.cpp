@@ -286,7 +286,8 @@ int AVRecordLive::OpenOutput()
         audioStream = avformat_new_stream(m_pOutFmtCtx, NULL);
         m_outAudioIndex = audioStream->index;
 
-        AVCodec *audioEncoder = avcodec_find_decoder(AV_CODEC_ID_AAC);
+        AVCodec *audioEncoder = avcodec_find_encoder(AV_CODEC_ID_AAC);
+
         m_outAudioEnCodecCtx = avcodec_alloc_context3(audioEncoder);
         m_outAudioEnCodecCtx->sample_fmt = audioEncoder->sample_fmts ? audioEncoder->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
         m_outAudioEnCodecCtx->bit_rate = m_audioBitrate;
@@ -527,6 +528,18 @@ void AVRecordLive::MuxerProcessThread()
             AVPacket pkt;
             av_init_packet(&pkt);
             ret = avcodec_send_frame(m_outAudioEnCodecCtx, audioFrame);
+
+            /* 调试信息
+            if (!av_codec_is_encoder(m_outAudioEnCodecCtx->codec)) {
+                qDebug() << "is encoder";
+                //return (codec->encode_sub || codec->encode2 ||codec->send_frame);
+            }
+
+            if (m_outAudioEnCodecCtx->codec->encode2) {
+                int a = 0;
+            }
+            */
+
             if (ret != 0) {
                 /*
                 AVERROR（EAGAIN）值为-11.
@@ -552,6 +565,7 @@ void AVRecordLive::MuxerProcessThread()
 
             av_packet_rescale_ts(&pkt, m_outAudioEnCodecCtx->time_base, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base);
             m_audioCurPts = pkt.pts;
+            qDebug() << "m_audioCurPts: " << m_audioCurPts;
 
             ret = av_interleaved_write_frame(m_pOutFmtCtx, &pkt);
             if (ret == 0) {
