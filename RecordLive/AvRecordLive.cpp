@@ -414,7 +414,7 @@ void AVRecordLive::MuxerProcessThread()
 
     // 从共享队列中读取数据，然后编码，存储或直播推流
     while(1) {
-        if (m_state == RecordState::STOP && !isDone) {
+        if (m_state == RecordState::START && !isDone) {
             isDone = true;
         }
 
@@ -433,124 +433,135 @@ void AVRecordLive::MuxerProcessThread()
                 qDebug() << "Both video and audio fifo buf are empty";
                 break;
             }
+         }
 
-            // 比较音视频pts, 大于0表示视频帧在前，音频还需要连续编码
-            // 小于0表示，音频帧在前，此时至少编码一帧视频
-            if (av_compare_ts(m_videoCurPts, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base,
-                              m_audioCurPts, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base) <= 0)
-            {
-                if (isDone) {
-                    std::lock_guard<std::mutex> lockguard(m_mutexVideoBuf);
-                    if (av_fifo_size(m_videoFifoBuffer) < m_videoOutFrameSize) {
-                        m_videoCurPts = INT_MAX;   // 0x7ffffffffffffffe
-                        continue;
-                    }
-                } else {
-                    std::unique_lock<std::mutex> uniqueLock(m_mutexVideoBuf);
-                    m_cvVideoBufNotEmpty.wait(uniqueLock, [this] {return av_fifo_size(m_videoFifoBuffer) >= m_videoOutFrameSize;});
-                }
-
-                // 从队列中拿出一帧，开始编码
-                av_fifo_generic_read(m_videoFifoBuffer, m_videoOutFrameBuf, m_videoOutFrameSize, NULL);
-
-                // 已拿出一帧，队列肯定不满了
-                m_cvVideoBufNotFull.notify_one();
-
-                // 设置视频帧参数
-                m_videoOutFrame->pts = videoFrameIndex++;
-                m_videoOutFrame->format = m_outVideoEncodecCtx->pix_fmt;
-                m_videoOutFrame->width = m_outVideoEncodecCtx->width;
-                m_videoOutFrame->height = m_outVideoEncodecCtx->height;
-
-                AVPacket outPacket;
-                av_init_packet(&outPacket);
-
-                // 将拿出来的YUV420P帧，设定pts发给编码器
-                ret = avcodec_send_frame(m_outVideoEncodecCtx, m_videoOutFrame);
-                if (ret != 0) {
-                    qDebug () << "out video avcodec_send_frame failed, ret=" <<ret;
-                    av_packet_unref(&outPacket);
-                }
-
-                // 从编码器读取编码压缩后的包AVPacket
-                ret = avcodec_receive_packet(m_outVideoEncodecCtx, &outPacket);
-                if (ret != 0) {
-                    qDebug() << "video avcodec_receive_packet failed, ret:" << ret;
-                    av_packet_unref(&outPacket);
+        // 比较音视频pts, 大于0表示视频帧在前，音频还需要连续编码
+        // 小于0表示，音频帧在前，此时至少编码一帧视频
+        if (av_compare_ts(m_videoCurPts, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base,
+                          m_audioCurPts, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base) <= 0)
+        {
+            if (isDone) {
+                std::lock_guard<std::mutex> lockguard(m_mutexVideoBuf);   // 阻塞
+                if (av_fifo_size(m_videoFifoBuffer) < m_videoOutFrameSize) {
+                    m_videoCurPts = INT_MAX;   // 0x7ffffffffffffffe
                     continue;
                 }
+            } else {
+                std::unique_lock<std::mutex> uniqueLock(m_mutexVideoBuf);
+                m_cvVideoBufNotEmpty.wait(uniqueLock, [this] {return av_fifo_size(m_videoFifoBuffer) >= m_videoOutFrameSize;});
+            }
 
-                outPacket.stream_index = m_outVideoIndex;
+            // 从队列中拿出一帧，开始编码
+            av_fifo_generic_read(m_videoFifoBuffer, m_videoOutFrameBuf, m_videoOutFrameSize, NULL);
 
-                // 将pts从编码层的timebase转成封装层的time_base
-                // 该函数通过计算两个时间基之间的比例，对AVPacket中的pts(显示时间戳)和dts(解码时间戳)进行相应的缩放。
-                // 这对于确保媒体处理管道中各环节的时间戳一致性至关重要
-                av_packet_rescale_ts(&outPacket, m_outVideoEncodecCtx->time_base, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base);
-                m_videoCurPts = outPacket.pts;
-                qDebug() << "m_videoCurPts:" << m_videoCurPts;
+            // 已拿出一帧，队列肯定不满了
+            m_cvVideoBufNotFull.notify_one();
 
-                // 向数据包写入输出的媒体文件
-                ret = av_interleaved_write_frame(m_pOutFmtCtx, &outPacket);
-                if (ret != 0) {
-                    qDebug() << "video av_interleaved_write_frame failed, ret:" << ret;
-                }
+            // 设置视频帧参数
+            m_videoOutFrame->pts = videoFrameIndex++;
+            m_videoOutFrame->format = m_outVideoEncodecCtx->pix_fmt;
+            m_videoOutFrame->width = m_outVideoEncodecCtx->width;
+            m_videoOutFrame->height = m_outVideoEncodecCtx->height;
 
+            AVPacket outPacket;
+            av_init_packet(&outPacket);
+
+            // 将拿出来的YUV420P帧，设定pts发给编码器
+            ret = avcodec_send_frame(m_outVideoEncodecCtx, m_videoOutFrame);
+            if (ret != 0) {
+                qDebug () << "out video avcodec_send_frame failed, ret=" <<ret;
                 av_packet_unref(&outPacket);
+                continue;
+            }
 
-            } else {    // 视频帧pts，在前面，此时音频需要编码
-                if (isDone) {
-                    std::lock_guard<std::mutex> lk(m_mutexAudioBuf);
-                    if (av_audio_fifo_size(m_audioFifoBuffer) < m_outnbSamplesPeerFrame) {
-                        m_audioCurPts = INT_MAX;
-                        continue;
-                    }
-                } else {
-                    std::unique_lock<std::mutex> lk(m_mutexAudioBuf);
-                    m_cvAudioBufNotEmpty.wait(lk, [this] {return av_audio_fifo_size(m_audioFifoBuffer) >= m_outnbSamplesPeerFrame;});
-                }
+            // 从编码器读取编码压缩后的包AVPacket
+            ret = avcodec_receive_packet(m_outVideoEncodecCtx, &outPacket);
+            if (ret != 0) {
+                qDebug() << "video avcodec_receive_packet failed, ret:" << ret;
+                av_packet_unref(&outPacket);
+                continue;
+            }
 
-                int ret = -1;
-                AVFrame *audioFrame = av_frame_alloc();
-                audioFrame->nb_samples = m_outnbSamplesPeerFrame;
-                audioFrame->channel_layout = m_outAudioEnCodecCtx->channel_layout;
-                audioFrame->format = m_outAudioEnCodecCtx->sample_fmt;
-                audioFrame->sample_rate = m_outAudioEnCodecCtx->sample_rate;
-                audioFrame->pts = m_outnbSamplesPeerFrame * audioFrameIndex++;
+            outPacket.stream_index = m_outVideoIndex;
 
-                // 分配databuf
-                ret = av_frame_get_buffer(audioFrame, 0);
-                av_audio_fifo_read(m_audioFifoBuffer, (void **)audioFrame->data, m_outnbSamplesPeerFrame);
-                m_cvAudioBufNotFull.notify_one();
+            // 将pts从编码层的timebase转成封装层的time_base
+            // 该函数通过计算两个时间基之间的比例，对AVPacket中的pts(显示时间戳)和dts(解码时间戳)进行相应的缩放。
+            // 这对于确保媒体处理管道中各环节的时间戳一致性至关重要
+            av_packet_rescale_ts(&outPacket, m_outVideoEncodecCtx->time_base, m_pOutFmtCtx->streams[m_outVideoIndex]->time_base);
+            m_videoCurPts = outPacket.pts;
+            qDebug() << "m_videoCurPts:" << m_videoCurPts;
 
-                AVPacket pkt;
-                av_init_packet(&pkt);
-                ret = avcodec_send_frame(m_outAudioEnCodecCtx, audioFrame);
-                if (ret != 0) {
-                    /*
-                    AVERROR（EAGAIN）值为-11.
-                    返回值为-11意味着需要新的输入数据才能返回新的输出。AAC默认是两帧
-                    在解码或编码开始时，编解码器可能会接收多个输入帧/数据包而不返回帧，直到其内部缓冲区被填充为止。
-                    AVERROR(EINVAL): 值为-22. 意味着编码器打开失败
-                    */
-                    qDebug() << "audio avcodec_send_frame failed, ret: " << ret;
-                    av_frame_free(&audioFrame);
-                    av_packet_unref(&pkt);
+            // 向数据包写入输出的媒体文件
+            ret = av_interleaved_write_frame(m_pOutFmtCtx, &outPacket);
+            if (ret != 0) {
+                qDebug() << "video av_interleaved_write_frame failed, ret:" << ret;
+            }
+
+            av_packet_unref(&outPacket);
+
+        } else {    // 视频帧pts，在前面，此时音频需要编码
+            if (isDone) {
+                std::lock_guard<std::mutex> lk(m_mutexAudioBuf);
+                if (av_audio_fifo_size(m_audioFifoBuffer) < m_outnbSamplesPeerFrame) {
+                    m_audioCurPts = INT_MAX;
                     continue;
                 }
+            } else {
+                std::unique_lock<std::mutex> lk(m_mutexAudioBuf);
+                m_cvAudioBufNotEmpty.wait(lk, [this] {return av_audio_fifo_size(m_audioFifoBuffer) >= m_outnbSamplesPeerFrame;});
+            }
 
-                pkt.stream_index = m_outAudioIndex;
+            int ret = -1;
+            AVFrame *audioFrame = av_frame_alloc();
+            audioFrame->nb_samples = m_outnbSamplesPeerFrame;
+            audioFrame->channel_layout = m_outAudioEnCodecCtx->channel_layout;
+            audioFrame->format = m_outAudioEnCodecCtx->sample_fmt;
+            audioFrame->sample_rate = m_outAudioEnCodecCtx->sample_rate;
+            audioFrame->pts = m_outnbSamplesPeerFrame * audioFrameIndex++;
 
-                av_packet_rescale_ts(&pkt, m_outAudioEnCodecCtx->time_base, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base);
-                m_audioCurPts = pkt.pts;
+            // 分配databuf
+            ret = av_frame_get_buffer(audioFrame, 0);
+            av_audio_fifo_read(m_audioFifoBuffer, (void **)audioFrame->data, m_outnbSamplesPeerFrame);
+            m_cvAudioBufNotFull.notify_one();
 
-                ret = av_interleaved_write_frame(m_pOutFmtCtx, &pkt);
-                if (ret != 0) {
-                    qDebug() << "audio av_interleaved_write_frame failed, ret: " << ret;
-                }
-
+            AVPacket pkt;
+            av_init_packet(&pkt);
+            ret = avcodec_send_frame(m_outAudioEnCodecCtx, audioFrame);
+            if (ret != 0) {
+                /*
+                AVERROR（EAGAIN）值为-11.
+                返回值为-11意味着需要新的输入数据才能返回新的输出。AAC默认是两帧
+                在解码或编码开始时，编解码器可能会接收多个输入帧/数据包而不返回帧，直到其内部缓冲区被填充为止。
+                AVERROR(EINVAL): 值为-22. 意味着编码器打开失败
+                */
+                qDebug() << "audio avcodec_send_frame failed, ret: " << ret;
                 av_frame_free(&audioFrame);
                 av_packet_unref(&pkt);
+                continue;
             }
+
+            ret = avcodec_receive_packet(m_outAudioEnCodecCtx, &pkt);
+            if (ret != 0) {
+                qDebug() << "MuxerProcessThread avcodec_receive_packet failed, ret:" << ret;
+                av_frame_free(&audioFrame);
+                av_packet_unref(&pkt);
+                continue;
+            }
+
+            pkt.stream_index = m_outAudioIndex;
+
+            av_packet_rescale_ts(&pkt, m_outAudioEnCodecCtx->time_base, m_pOutFmtCtx->streams[m_outAudioIndex]->time_base);
+            m_audioCurPts = pkt.pts;
+
+            ret = av_interleaved_write_frame(m_pOutFmtCtx, &pkt);
+            if (ret == 0) {
+                qDebug() << "audio av_interleaved_write_frame success";
+            } else {
+                qDebug() << "audio av_interleaved_write_frame failed, ret: " << ret;
+            }
+
+            av_frame_free(&audioFrame);
+            av_packet_unref(&pkt);
         }
     }
 }
@@ -616,7 +627,7 @@ void AVRecordLive::VideoRecordThread()
 
         av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[0], pixNumPeerFrame, NULL);
         av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
-        av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[1], pixNumPeerFrame / 4, NULL);
+        av_fifo_generic_write(m_videoFifoBuffer, newFrame->data[2], pixNumPeerFrame / 4, NULL);
 
         // 此时已经写入一帧数据，队列不为空
         m_cvVideoBufNotEmpty.notify_one();
